@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: my-configured-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    # Указываем Redis использовать наш файл конфигурации
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      # Пробрасываем наш локальный redis.conf внутрь контейнера
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+      # Подключаем том для хранения данных
+      - redis-data:/data
+
+volumes:
+  redis-data:
+    driver: local
