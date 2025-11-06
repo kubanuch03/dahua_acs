@@ -81,11 +81,28 @@ class Worker:
                 
                 event_info = ctypes.cast(original_bytes, ctypes.POINTER(NET_A_ALARM_ACCESS_CTL_EVENT_INFO)).contents
 
-                logging.info(f"DATA: {event_info}")
+                logging.info(f"="*80)
                 
-                logging.info(f"Получено событие от UserID: {event_info.szUserID.decode(errors='ignore')}, "
-                             f"Метод: {NET_ACCESS_DOOROPEN_METHOD(event_info.emOpenMethod).name}, "
-                             f"Статус: {'Успех' if event_info.bStatus else 'Неудача'}")
+                logging.info(f"""
+                             Получено событие от UserID: {event_info.szUserID.decode(errors='ignore')}, 
+                             Метод: {NET_ACCESS_DOOROPEN_METHOD(event_info.emOpenMethod).name}, 
+                             Статус: {'Успех' if event_info.bStatus else 'Неудача'}
+                             
+                             Дополнительно:
+                             Номер карты: {event_info.szCardNo.decode(errors='ignore')}
+                             Passw: {event_info.szPwd.decode(errors='ignore')}
+                             szReaderID: {event_info.szReaderID.decode(errors='ignore')}
+                             nAge: {event_info.nAge}
+                             nLiftNo: {event_info.nLiftNo}
+                             nNumbers: {event_info.nNumbers}
+                             nDoor: {event_info.nDoor}
+                             szDoorName: {event_info.szDoorName.decode(errors='ignore')}
+                             szSnapURL: {event_info.szSnapURL.decode(errors='ignore')}
+                             """
+                             
+                             
+                             )
+                logging.info(f"="*80)
 
                 if (event_info.bStatus and 
                     event_info.emOpenMethod == NET_ACCESS_DOOROPEN_METHOD.FACE_RECOGNITION):
