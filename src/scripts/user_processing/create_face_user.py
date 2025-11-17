@@ -1,271 +1,215 @@
-# coding=utf-8
-import os
-import sys
+# -*- coding: utf-8 -*-
+import resource
+
 import ctypes
+import time
+from ctypes import c_int, POINTER, c_ubyte, c_void_p, cast, byref
 from datetime import datetime, timedelta
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt5.QtCore import Qt, QDateTime
-# Импорты ctypes из вашего предыдущего скрипта
-from ctypes import (c_int, POINTER, Structure, c_ulong, c_char, c_ubyte,
-                    c_void_p, c_bool, c_byte, cast, byref, create_string_buffer, sizeof)
+# Импорты Dahua SDK
+from NetSDK.NetSDK import NetClient  
+from NetSDK.SDK_Callback import fDisConnect
+from NetSDK.SDK_Struct import (
+    NET_ACCESS_USER_INFO, NET_TIME,
+    NET_IN_ACCESS_USER_SERVICE_INSERT, NET_OUT_ACCESS_USER_SERVICE_INSERT,
+    NET_IN_ACCESS_FACE_SERVICE_UPDATE, NET_OUT_ACCESS_FACE_SERVICE_UPDATE,
+    NET_IN_ACCESS_FACE_SERVICE_INSERT, NET_OUT_ACCESS_FACE_SERVICE_INSERT,
+    NET_ACCESS_FACE_INFO
+)
+from NetSDK.SDK_Enum import (
+    EM_A_NET_EM_ACCESS_CTL_USER_SERVICE,
+    EM_A_NET_ENUM_USER_TYPE,
+    EM_A_NET_EM_FAILCODE,
+    EM_A_NET_EM_ACCESS_CTL_FACE_SERVICE
+)
 
-# Основные импорты UI и SDK
-from DeviceControlUI import Ui_MainWindow
-from NetSDK.NetSDK import NetClient
-from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect
-from NetSDK.SDK_Enum import (EM_DEV_CFG_TYPE, EM_LOGIN_SPAC_CAP_TYPE, 
-                           EM_A_NET_EM_ACCESS_CTL_FACE_SERVICE, EM_A_NET_EM_FAILCODE) # Добавлены ENUM для лиц
-from NetSDK.SDK_Struct import (LOG_SET_PRINT_INFO, NET_TIME, C_LDWORD, C_LLONG, 
-                             NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY, NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY, 
-                             CB_FUNCTYPE, NET_ACCESS_FACE_INFO, NET_IN_ACCESS_FACE_SERVICE_INSERT, 
-                             NET_OUT_ACCESS_FACE_SERVICE_INSERT) # Добавлены структуры для лиц
 
-# --- КОНСТАНТЫ ДЛЯ ДОБАВЛЕНИЯ ЛИЦА ---
+# ============ НАСТРОЙКИ ============
+DEVICE_IP = "192.168.10.157"
+DEVICE_PORT = 37777
+USERNAME = "admin"
+PASSWORD = "S347367j"
+
 NEW_USER_ID = "5001"
-FACE_IMAGE_PATH = "./img/aidin_profile.jpg" # Убедитесь, что путь правильный
+NEW_USER_NAME = "Test User 5001"
+NEW_CARD_NO = "50015001"
+NEW_USER_PASSWORD = "123456"
+USER_PHOTO_PATH = "./img/tilek2.jpeg"
 
-class MyMainWindow(QMainWindow, Ui_MainWindow):
-    def __init__(self, parent=None):
-        super(MyMainWindow, self).__init__(parent)
-        self.setupUi(self)
+ACCESSIBLE_DOORS = [0]
+ACCESSIBLE_SCHEDULES = [1]
 
-        # NetSDK用到的相关变量和回调
-        self.loginID = C_LLONG()
-        self.m_DisConnectCallBack = fDisConnect(self.DisConnectCallBack)
-        self.m_ReConnectCallBack = fHaveReConnect(self.ReConnectCallBack)
-        
-        # 界面初始化
-        self._init_ui()
+# ===================================
 
-        # 获取NetSDK对象并初始化
-        self.sdk = NetClient()
-        self.sdk.InitEx(self.m_DisConnectCallBack)
-        self.sdk.SetAutoReconnect(self.m_ReConnectCallBack)
 
-    # 初始化界面
-    def _init_ui(self):
-        self.Login_pushButton.setText('登录(Login)')
-        # IP адрес из вашего русского скрипта
-        self.IP_lineEdit.setText('192.168.10.157') 
-        self.Port_lineEdit.setText('37777')
-        self.Name_lineEdit.setText('admin')
-        self.Pwd_lineEdit.setText('S347367j')
+def get_memory_usage():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
-        self.setWindowFlag(Qt.WindowMinimizeButtonHint)
-        self.setWindowFlag(Qt.WindowCloseButtonHint)
-        self.setFixedSize(self.width(), self.height())
 
-        self.Login_pushButton.clicked.connect(self.login_btn_onclick)
-        self.OpenLog_pushButton.clicked.connect(self.openlog_btn_onclick)
-        self.CloseLog_pushButton.clicked.connect(self.closelog_btn_onclick)
-        self.GetTime_pushButton.clicked.connect(self.gettime_btn_onclick)
-        self.SetTime_pushButton.clicked.connect(self.settime_btn_onclick)
-        self.Restart_pushButton.clicked.connect(self.restart_btn_onclick)
-        
-        # --- НОВАЯ СВЯЗЬ ДЛЯ КНОПКИ ДОБАВЛЕНИЯ ЛИЦА ---
-        # Предполагается, что в DeviceControlUI.py вы добавили кнопку с именем AddFace_pushButton
-        if hasattr(self, 'AddFace_pushButton'):
-            self.AddFace_pushButton.clicked.connect(self.add_face_btn_onclick)
-        else:
-            print("ПРЕДУПРЕЖДЕНИЕ: Кнопка 'AddFace_pushButton' не найдена в UI. Функция добавления лица не будет доступна.")
+initial_memory = get_memory_usage()
+print(f"Потребление памяти до запуска: {initial_memory / 1024:.2f} MB")
 
-    def login_btn_onclick(self):
-        # В этой реализации loginID это C_LLONG(), поэтому проверяем его значение .value
-        if self.loginID.value == 0:
-            ip = self.IP_lineEdit.text()
-            port = int(self.Port_lineEdit.text())
-            username = self.Name_lineEdit.text()
-            password = self.Pwd_lineEdit.text()
-            
-            stuInParam = NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY()
-            stuInParam.dwSize = sizeof(NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY)
-            stuInParam.szIP = ip.encode()
-            stuInParam.nPort = port
-            stuInParam.szUserName = username.encode()
-            stuInParam.szPassword = password.encode()
-            stuInParam.emSpecCap = EM_LOGIN_SPAC_CAP_TYPE.TCP
-            stuInParam.pCapParam = None
 
-            stuOutParam = NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY()
-            stuOutParam.dwSize = sizeof(NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY)
 
-            # loginID теперь C_LLONG, нужно получать его значение через .value
-            login_id_val, device_info, error_msg = self.sdk.LoginWithHighLevelSecurity(stuInParam, stuOutParam)
-            self.loginID.value = login_id_val
-            
-            if self.loginID.value != 0:
-                self.setWindowTitle('设备控制(DeviceControl)-在线(OnLine)')
-                self.Login_pushButton.setText('登出(Logout)')
-            else:
-                QMessageBox.about(self, '提示(prompt)', error_msg)
-        else:
-            result = self.sdk.Logout(self.loginID)
-            if result:
-                self.setWindowTitle("设备控制(DeviceControl)-离线(OffLine)")
-                self.Login_pushButton.setText("登录(Login)")
-                self.loginID.value = 0
+def on_disconnect_callback(login_id, ip_address, port, user_data):
+    ip_str = ip_address.decode()
+    print(f"!!! ВНИМАНИЕ: Устройство {ip_str} отключилось.")
 
-    # --- НОВЫЙ МЕТОД ДЛЯ ДОБАВЛЕНИЯ ЛИЦА ---
-    def add_face_btn_onclick(self):
-        if self.loginID.value == 0:
-            QMessageBox.warning(self, 'Ошибка', 'Необходимо сначала войти на устройство!')
+c_on_disconnect = fDisConnect(on_disconnect_callback)
+
+
+def create_user_with_photo():
+    print("1. Инициализация SDK...")
+    netsdk = NetClient()
+    if not netsdk.InitEx(c_on_disconnect):
+        print("Не удалось инициализировать SDK. Выход.")
+        return
+
+    login_id = 0
+    try:
+        print(f"2. Вход на устройство {DEVICE_IP}...")
+        login_id, device_info, error_message = netsdk.LoginEx2(DEVICE_IP, DEVICE_PORT, USERNAME, PASSWORD)
+        if login_id == 0:
+            print(f"Ошибка входа: {error_message}")
             return
+        print(f"   Вход выполнен успешно. ID сессии: {login_id}")
+
+        print(f"3. Создание пользователя '{NEW_USER_NAME}' (ID: {NEW_USER_ID})...")
+
+        user_info = NET_ACCESS_USER_INFO()
+        ctypes.memset(ctypes.addressof(user_info), 0, ctypes.sizeof(user_info))
+        user_info.dwSize = ctypes.sizeof(user_info)
+        user_info.bIsValid = True
+        user_info.szUserID = NEW_USER_ID.encode()
+        user_info.szName = NEW_USER_NAME.encode()
+        user_info.szCardNo = NEW_CARD_NO.encode()
+        user_info.szPsw = NEW_USER_PASSWORD.encode()
+        user_info.emUserType = EM_A_NET_ENUM_USER_TYPE.NET_ENUM_USER_TYPE_NORMAL
+        user_info.nUserStatus = 0
+        user_info.bFirstEnter = False
+        user_info.nDoorNum = len(ACCESSIBLE_DOORS)
+
+        # Двери
+        full_door_array = (c_int * 32)(-1)
+        for i, door_id in enumerate(ACCESSIBLE_DOORS):
+            full_door_array[i] = door_id
+        user_info.nDoors = full_door_array
+
+        # Расписания
+        user_info.nTimeSectionNum = len(ACCESSIBLE_SCHEDULES)
+        full_schedule_array = (c_int * 32)(-1)
+        for i, schedule_id in enumerate(ACCESSIBLE_SCHEDULES):
+            full_schedule_array[i] = schedule_id
+        user_info.nTimeSectionNo = full_schedule_array
+
+        # Временной диапазон действия
+        user_info.stuValidBeginTime = NET_TIME(2020, 1, 1, 0, 0, 0)
+        user_info.stuValidEndTime = NET_TIME(2037, 12, 31, 23, 59, 59)
+
+        # Вставка пользователя
+        insert_in = NET_IN_ACCESS_USER_SERVICE_INSERT()
+        insert_in.dwSize = ctypes.sizeof(insert_in)
+        insert_in.nInfoNum = 1
+        insert_in.pUserInfo = ctypes.pointer(user_info)
+
+        fail_codes = (c_int * insert_in.nInfoNum)()
+        insert_out = NET_OUT_ACCESS_USER_SERVICE_INSERT()
+        insert_out.dwSize = ctypes.sizeof(insert_out)
+        insert_out.nMaxRetNum = insert_in.nInfoNum
+        insert_out.pFailCode = ctypes.cast(fail_codes, POINTER(c_int))
+
+        success = netsdk.OperateAccessUserService(
+            login_id,
+            EM_A_NET_EM_ACCESS_CTL_USER_SERVICE.NET_EM_ACCESS_CTL_USER_SERVICE_INSERT,
+            insert_in,
+            insert_out,
+            5000
+        )
+
+        if not success:
+            print(f"❌ Ошибка создания пользователя. Код SDK: {netsdk.GetLastError()}")
+            return
+
+        if fail_codes[0] == EM_A_NET_EM_FAILCODE.NET_EM_FAILCODE_NOERROR:
+            print("✅ Пользователь успешно создан.")
+        else:
+            print(f"⚠️ Ошибка при создании пользователя: {fail_codes[0]}")
+
+        
+        print("4. Добавление фотографии...")
 
         try:
-            # 1. Загрузка изображения
-            with open(FACE_IMAGE_PATH, 'rb') as f:
+            with open(USER_PHOTO_PATH, "rb") as f:
                 face_data_bytes = f.read()
-            face_data_len = len(face_data_bytes)
-            
-            # 2. Выделение памяти и подготовка структур
-            face_data_buffer = create_string_buffer(face_data_bytes, face_data_len)
-            
-            FaceInfoArray = NET_ACCESS_FACE_INFO * 1
-            face_info_array = FaceInfoArray()
-            ctypes.memset(byref(face_info_array), 0, sizeof(face_info_array))
-            
-            face_info = face_info_array[0]
-            face_info.dwSize = sizeof(face_info)
-            face_info.szUserID = NEW_USER_ID.encode()
-            face_info.bEnable = True
-            face_info.nFacePhoto = 1
-            face_info.nInFacePhotoLen[0] = face_data_len
-            face_info.pFacePhoto[0] = cast(face_data_buffer, c_void_p)
-            
-            now = datetime.now()
-            future = now + timedelta(days=365 * 20)
-            face_info.stuValidStartTime = NET_TIME(now.year, now.month, now.day, now.hour, now.minute, now.second)
-            face_info.stuValidEndTime = NET_TIME(future.year, future.month, future.day, future.hour, future.minute, future.second)
-            face_info.stuUpdateTime = NET_TIME(now.year, now.month, now.day, now.hour, now.minute, now.second)
-
-            insert_params = NET_IN_ACCESS_FACE_SERVICE_INSERT()
-            ctypes.memset(byref(insert_params), 0, sizeof(insert_params))
-            insert_params.dwSize = sizeof(insert_params)
-            insert_params.nFaceInfoNum = 1
-            insert_params.pFaceInfo = cast(face_info_array, POINTER(NET_ACCESS_FACE_INFO))
-
-            fail_codes_array = (c_int * insert_params.nFaceInfoNum)()
-            output_results = NET_OUT_ACCESS_FACE_SERVICE_INSERT()
-            ctypes.memset(byref(output_results), 0, sizeof(output_results))
-            output_results.dwSize = sizeof(output_results)
-            output_results.nMaxRetNum = insert_params.nFaceInfoNum
-            output_results.pFailCode = cast(fail_codes_array, POINTER(c_int))
-            
-            # 3. Вызов API
-            # Эта обертка, как мы выяснили, не требует byref()
-            success = self.sdk.OperateAccessFaceService(
-                self.loginID,
-                EM_A_NET_EM_ACCESS_CTL_FACE_SERVICE.NET_EM_ACCESS_CTL_FACE_SERVICE_INSERT,
-                insert_params,
-                output_results,
-                20000
-            )
-            
-            # 4. Обработка результата
-            if success:
-                result_code_val = fail_codes_array[0]
-                if result_code_val == 0:
-                    QMessageBox.information(self, 'Успех', f"Фотография лица успешно добавлена для пользователя '{NEW_USER_ID}'.")
-                else:
-                    try:
-                        error_name = EM_A_NET_EM_FAILCODE(result_code_val).name
-                        message = f"Ошибка при добавлении лица: {error_name} ({result_code_val})"
-                    except ValueError:
-                        message = f"Ошибка при добавлении лица: Неизвестный код возврата ({result_code_val})"
-                    QMessageBox.critical(self, 'Ошибка операции', message)
-            else:
-                error_code = self.sdk.GetLastError()
-                QMessageBox.critical(self, 'Ошибка SDK', f"Не удалось выполнить операцию! Код ошибки SDK: {error_code}")
-
         except FileNotFoundError:
-             QMessageBox.critical(self, 'Ошибка файла', f"Файл изображения не найден по пути: {FACE_IMAGE_PATH}")
-        except Exception as e:
-            QMessageBox.critical(self, 'Непредвиденная ошибка', f"Произошло исключение: {e}")
-
-    def openlog_btn_onclick(self):
-        log_info = LOG_SET_PRINT_INFO()
-        log_info.dwSize = sizeof(LOG_SET_PRINT_INFO)
-        log_info.bSetFilePath = 1
-        log_info.szLogFilePath = os.path.join(os.getcwd(), 'sdk_log.log').encode('gbk')
-        result = self.sdk.LogOpen(log_info)
-        if not result:
-            QMessageBox.about(self, '提示(prompt)', self.sdk.GetLastErrorMessage())
-
-    def closelog_btn_onclick(self):
-        result = self.sdk.LogClose()
-        if not result:
-            QMessageBox.about(self, '提示(prompt)', self.sdk.GetLastErrorMessage())
-
-    def gettime_btn_onclick(self):
-        if self.loginID.value == 0:
-            QMessageBox.warning(self, '提示(prompt)', 'Пожалуйста, сначала войдите в систему (Please login first)')
-            return
-        
-        time_struct = NET_TIME()
-        result = self.sdk.GetDevConfig(self.loginID, int(EM_DEV_CFG_TYPE.TIMECFG), -1, byref(time_struct), sizeof(NET_TIME))
-        if not result:
-            QMessageBox.about(self, '提示(prompt)', self.sdk.GetLastErrorMessage())
-        else:
-            get_time = QDateTime(time_struct.dwYear, time_struct.dwMonth, time_struct.dwDay, time_struct.dwHour, time_struct.dwMinute, time_struct.dwSecond)
-            self.Time_dateTimeEdit.setDateTime(get_time)
-
-    def settime_btn_onclick(self):
-        if self.loginID.value == 0:
-            QMessageBox.warning(self, '提示(prompt)', 'Пожалуйста, сначала войдите в систему (Please login first)')
+            print(f"Файл {USER_PHOTO_PATH} не найден!")
             return
 
-        device_date = self.Time_dateTimeEdit.date()
-        device_time = self.Time_dateTimeEdit.time()
-        
-        deviceDateTime = NET_TIME()
-        deviceDateTime.dwYear = device_date.year()
-        deviceDateTime.dwMonth = device_date.month()
-        deviceDateTime.dwDay = device_date.day()
-        deviceDateTime.dwHour = device_time.hour()
-        deviceDateTime.dwMinute = device_time.minute()
-        deviceDateTime.dwSecond = device_time.second()
+        print(f"   Изображение загружено. Размер: {len(face_data_bytes)} байт.")
 
-        result = self.sdk.SetDevConfig(self.loginID, int(EM_DEV_CFG_TYPE.TIMECFG), -1, byref(deviceDateTime), sizeof(NET_TIME))
-        if not result:
-            QMessageBox.about(self, '提示(prompt)', self.sdk.GetLastErrorMessage())
+        face_data_len = len(face_data_bytes)
+        face_data_buffer = (c_ubyte * face_data_len)(*face_data_bytes)
+
+        FaceInfoArray = NET_ACCESS_FACE_INFO * 1
+        face_info_array = FaceInfoArray()
+        face_info = face_info_array[0]
+
+        ctypes.memset(byref(face_info), 0, ctypes.sizeof(face_info))
+
+        face_info.dwSize = ctypes.sizeof(face_info)
+        face_info.szUserID = NEW_USER_ID.encode()
+        face_info.bEnable = True
+        face_info.nFacePhoto = 1
+        face_info.nInFacePhotoLen[0] = face_data_len
+        face_info.pFacePhoto[0] = cast(face_data_buffer, c_void_p)
+
+        now = datetime.now()
+        future = now + timedelta(days=365 * 20)
+        face_info.stuValidStartTime = NET_TIME(now.year, now.month, now.day, now.hour, now.minute, now.second)
+        face_info.stuValidEndTime = NET_TIME(future.year, future.month, future.day, future.hour, future.minute, future.second)
+        face_info.stuUpdateTime = NET_TIME(now.year, now.month, now.day, now.hour, now.minute, now.second)
+
+        face_in = NET_IN_ACCESS_FACE_SERVICE_INSERT()
+        face_in.dwSize = ctypes.sizeof(NET_IN_ACCESS_FACE_SERVICE_UPDATE)
+        face_in.nFaceInfoNum = 1
+        face_in.pFaceInfo = face_info_array
+
+        fail_codes = (c_int * face_in.nFaceInfoNum)()
+        face_out = NET_OUT_ACCESS_FACE_SERVICE_INSERT()
+        face_out.dwSize = ctypes.sizeof(NET_OUT_ACCESS_FACE_SERVICE_INSERT)
+        face_out.nMaxRetNum = face_in.nFaceInfoNum
+        face_out.pFailCode = cast(fail_codes, POINTER(c_int))
+
+        success = netsdk.OperateAccessFaceService(
+            login_id,
+            EM_A_NET_EM_ACCESS_CTL_FACE_SERVICE.NET_EM_ACCESS_CTL_FACE_SERVICE_INSERT,
+            face_in,
+            face_out,
+            15000
+        )
+
+        if success:
+            if fail_codes[0] == EM_A_NET_EM_FAILCODE.NET_EM_FAILCODE_NOERROR:
+                print("✅ Фото успешно добавлено пользователю.")
+            else:
+                print(f"⚠️ Ошибка при добавлении фото: {fail_codes[0]}")
         else:
-             QMessageBox.information(self, '提示(prompt)', 'Время успешно установлено (Time set successfully)')
+            err = netsdk.GetLastError()
+            print(f"❌ Ошибка добавления фото. Код SDK: {err}")
+
+    except Exception as e:
+        print(f"Произошло исключение: {e}")
+
+    finally:
+        print("5. Завершение работы...")
+        if login_id != 0:
+            netsdk.Logout(login_id)
+        netsdk.Cleanup()
+        print("Скрипт завершен.")
 
 
-    def restart_btn_onclick(self):
-        if self.loginID.value == 0:
-            QMessageBox.warning(self, '提示(prompt)', 'Пожалуйста, сначала войдите в систему (Please login first)')
-            return
-            
-        result = self.sdk.RebootDev(self.loginID)
-        if not result:
-            QMessageBox.about(self, '提示(prompt)', self.sdk.GetLastErrorMessage())
-        else:
-            QMessageBox.about(self, '提示(prompt)', 'Перезагрузка начата (Restart initiated)')
-
-    # 实现断线回调函数功能
-    def DisConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
-        self.setWindowTitle("设备控制(DeviceControl)-离线(OffLine)")
-        self.Login_pushButton.setText("登录(Login)")
-        self.loginID.value = 0
-
-    # 实现断线重连回调函数功能
-    def ReConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
-        self.setWindowTitle('设备控制(DeviceControl)-在线(OnLine)')
-        self.Login_pushButton.setText('登出(Logout)')
-        self.loginID.value = lLoginID # Восстанавливаем ID сессии
-
-    # 关闭主窗口时清理资源
-    def closeEvent(self, event):
-        if self.loginID.value != 0:
-            self.sdk.Logout(self.loginID)
-        self.sdk.Cleanup()
-        event.accept()
-
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    my_wnd = MyMainWindow()
-    my_wnd.show()
-    sys.exit(app.exec_())
+if __name__ == "__main__":
+    create_user_with_photo()
+    final_memory = get_memory_usage()
+    print(f"Потребление памяти после запуска: {final_memory / 1024:.2f} MB")
+    print(f"Разница: {(final_memory - initial_memory) / 1024:.2f} MB")
