@@ -43,7 +43,6 @@ backend/app_documents/migrations/0001_initial.py
 
 .vscode
 acs_dahua
-
 backend/poetry.lock
 backend/uv.lock
 backend/data/
