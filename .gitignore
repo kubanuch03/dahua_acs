@@ -41,11 +41,13 @@ backend/data.json
 backend/app_documents/migrations/0001_initial.py
 
 
+.vscode
+acs_dahua
+
 backend/poetry.lock
-data/
-backend/data/
-venv
-poetry.lock
 backend/uv.lock
-uv.lock
+backend/data/
+
+data/
+venv
 staticfiles
